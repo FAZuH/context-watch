@@ -26,10 +26,9 @@ bunx biome format --write .
 bunx biome check .
 ```
 
-Note: `bunx biome check .` is NOT clean at HEAD — pre-existing `noNonNullAssertion`
-errors in `src/index.ts` and `lint` errors in `.github/.config.cjs`. Also, biome
-reformats `package.json`/`tsconfig.json`/`.config.cjs` to tabs (HEAD keeps 2-space),
-so `dev.sh format` re-dirties them; revert before committing.
+Note: `biome.json` at the repo root ignores `.github/.config.cjs` (release-changelog
+tooling) and formats JSON files with 2-space indent to match the committed style.
+`bunx biome check .` is clean at HEAD.
 
 ## Critical Implementation Notes
 
