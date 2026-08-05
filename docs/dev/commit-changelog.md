@@ -106,7 +106,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 - **type** — `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `ci`, `chore`,
   `style`, `build`, `revert`
-- **scope** — optional; reflects the area of the codebase being changed
+- **scope** — optional; reflects the area of the codebase being changed (see
+  `docs/dev/commit-scopes.md`)
 - **subject** — not used in the changelog; kept short and technical
 
 ```

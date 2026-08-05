@@ -32,7 +32,7 @@ bunx biome check .
 
 - TypeScript, strict mode, `tsconfig.json` at repo root (lib es2022 + dom, types node).
 - No comments unless they explain non-obvious behavior (this plugin has several such comments; keep them).
-- Conventional Commits with `changelog:` body key per `docs/dev/commit-changelog.md` conventions.
+- Conventional Commits with `changelog:` body key per `docs/dev/commit-changelog.md` conventions; scopes per `docs/dev/commit-scopes.md`.
 
 ## License
 
