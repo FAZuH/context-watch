@@ -1,0 +1,51 @@
+name: Patch Version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string to patch into package.json'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  patch:
+    name: Patch package.json Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Determine version
+        id: set-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+            VERSION="${LATEST_TAG:-}"
+            if [ -z "$VERSION" ]; then
+              VERSION=$(grep '"version"' package.json | head -n1 | sed 's/.*"version": *"\(.*\)".*/\1/')
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Patching version: $VERSION"
+
+      - name: Patch package.json
+        run: |
+          VERSION=${{ steps.set-version.outputs.version }}
+          VERSION=${VERSION#v}
+          sed -i "0,/\"version\": \".*\"/{s/\"version\": \".*\"/\"version\": \"$VERSION\"/}" package.json
+
+      - name: Upload patched package.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-package
+          path: package.json

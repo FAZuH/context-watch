@@ -1,0 +1,40 @@
+name: Build TypeScript Bundle
+
+on:
+  workflow_call:
+    inputs:
+      entry:
+        description: 'Entry point to bundle'
+        required: false
+        type: string
+        default: 'src/index.ts'
+
+jobs:
+  build:
+    name: Build Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download patched package.json
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-package
+          path: .
+        continue-on-error: true
+
+      - name: Build bundle
+        run: bun build ${{ inputs.entry }} --outdir dist
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

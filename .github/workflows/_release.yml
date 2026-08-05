@@ -1,0 +1,230 @@
+name: Release TypeScript Package
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: 'npm package name'
+        required: false
+        type: string
+        default: ''
+      publish-npm:
+        description: 'Publish to npm'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      tag:
+        description: 'The release tag that was created'
+        value: ${{ jobs.publish-changelog.outputs.tag }}
+    secrets:
+      PRIVATE_TOKEN:
+        required: true
+      NPM_TOKEN:
+        required: false
+      DISCORD_RELEASE_WEBHOOK_URL:
+        required: false
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.changelog.outputs.tag }}
+      skipped: ${{ steps.changelog.outputs.skipped }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Set Up version.json
+        run: |
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
+
+      - name: Install changelog dependencies
+        run: |
+          npm install conventional-changelog-conventionalcommits@7.0.2
+          rm -f package.json package-lock.json
+
+      - name: Generate Changelog (dry run)
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          skip-commit: true
+          skip-tag: true
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          preset: conventionalcommits
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+
+  patch-version:
+    name: Patch Version
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    uses: ./.github/workflows/patch-version.yml
+    with:
+      version: ${{ needs.changelog.outputs.tag }}
+
+  build:
+    name: Build Bundle
+    needs: [changelog, patch-version]
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    uses: ./.github/workflows/build.yml
+
+  publish-npm:
+    name: Publish to npm
+    needs: [changelog, patch-version, build]
+    if: |
+      always() &&
+      needs.changelog.outputs.skipped != 'true' &&
+      inputs.publish-npm &&
+      needs.changelog.result == 'success' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download patched package.json
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-package
+          path: .
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-changelog:
+    name: Publish Changelog Commit
+    needs: [changelog, build, publish-npm]
+    if: |
+      always() &&
+      needs.changelog.outputs.skipped != 'true' &&
+      needs.changelog.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped')
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch All Tags
+        run: git fetch --tags --force origin '+refs/tags/*:refs/tags/*'
+
+      - name: Set Up version.json
+        run: |
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          echo "{\"version\":\"${LATEST_TAG:-v0.0.0}\"}" > version.json
+
+      - name: Download patched package.json
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-package
+          path: .
+
+      - name: Stage patched files
+        run: |
+          git add package.json
+
+      - name: Install changelog dependencies
+        run: |
+          npm install conventional-changelog-conventionalcommits@7.0.2
+          rm -f package.json package-lock.json
+
+      - name: Commit, Tag, Push
+        id: commit
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          git-user-name: "faz-bot"
+          git-user-email: "mail@fazuh.com"
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          preset: conventionalcommits
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+          git-push: false
+
+      - name: Clean stale artifacts and push release
+        run: |
+          git config user.name "faz-bot"
+          git config user.email "mail@fazuh.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
+          TAG="${{ steps.commit.outputs.tag }}"
+          git rm --cached -rf --ignore-unmatch node_modules/ version.json
+          git commit --amend --no-edit
+          if [ -n "$TAG" ]; then
+            git tag -f "$TAG"
+          fi
+          git push origin release --tags
+
+      - name: Sync version bump to main
+        run: |
+          git config user.name "faz-bot"
+          git config user.email "mail@fazuh.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.PRIVATE_TOKEN }}@github.com/${{ github.repository }}"
+          git fetch origin main
+          git checkout -B main origin/main
+          git merge release --no-edit -m "chore(release): sync version bump to main [skip ci]"
+          git push origin main
+
+  release-github:
+    name: Release to GitHub
+    needs: [changelog, build, publish-changelog, publish-npm]
+    if: |
+      always() &&
+      needs.changelog.outputs.skipped != 'true' &&
+      needs.changelog.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped') &&
+      needs.publish-changelog.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.publish-changelog.outputs.tag }}
+          body: ${{ needs.changelog.outputs.changelog }}
+
+      - name: Post Release on Discord
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          embed-color: "9498256"
+          embed-title: "${{ inputs.package-name }} ${{ needs.publish-changelog.outputs.tag }}"
+          embed-description: ${{ needs.changelog.outputs.changelog }}
+          embed-url: ${{ steps.release.outputs.url }}
+          embed-timestamp: ${{ github.event.head_commit.timestamp }}

@@ -1,0 +1,19 @@
+name: Workspace Bump Preview (stub)
+
+on:
+  workflow_call:
+    outputs:
+      member-versions:
+        description: 'JSON object of member:current:bumped'
+        value: ${{ jobs.detect.outputs.member-versions }}
+
+jobs:
+  detect:
+    name: Detect Workspace Changes
+    runs-on: ubuntu-latest
+    outputs:
+      member-versions: ${{ steps.output.outputs.member-versions }}
+    steps:
+      - name: No-op
+        id: output
+        run: echo "member-versions={}" >> "$GITHUB_OUTPUT"
