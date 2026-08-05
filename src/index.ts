@@ -5,7 +5,8 @@
  * so you can wrap up the current step or prepare for compaction before the
  * window is full. Warns again as usage rises through each rearm band.
  *
- * Default threshold: 77% of the model's context window.
+ * Default thresholds: 77% of the model's context window, or 100k tokens —
+ * whichever comes first.
  *
  * How it works:
  * - `experimental.chat.messages.transform` runs each turn with the full
@@ -20,20 +21,19 @@
  *
  * Config file (optional): ~/.config/opencode/context-watch.json
  * {
- *   "mode": "percent",       // "percent" (default) or "tokens"
- *   "warnThreshold": 0.77,   // 0..1, or percent (e.g. 77) if > 1 (percent mode)
- *   "warnTokens": 100000,    // warn when session reaches this many tokens (tokens mode)
+ *   "warnPercent": 0.77,     // 0..1, or percent (e.g. 77) if > 1
+ *   "warnTokens": 100000,    // warn when session reaches this many tokens
  *   "windowTokens": null,    // override the model's context window (tokens)
- *   "rearmPercent": 5,       // re-warn after this many percentage-point rise (percent mode)
- *   "rearmTokens": 5000,     // re-warn after this many more tokens (tokens mode)
+ *   "rearmPercent": 5,       // re-warn after this many percentage-point rise
+ *   "rearmTokens": 5000,     // re-warn after this many more tokens
  *   "toast": true,           // show a TUI toast when a band is crossed
  *   "verbose": false,        // log context estimates to the opencode log
  *   "message": "..."         // template; placeholders {percent} {tokens} {window}
  * }
  *
- * Env overrides: CONTEXT_WATCH_MODE, CONTEXT_WATCH_THRESHOLD,
- * CONTEXT_WATCH_TOKENS, CONTEXT_WATCH_WINDOW, CONTEXT_WATCH_REARM,
- * CONTEXT_WATCH_REARM_TOKENS, CONTEXT_WATCH_MESSAGE, CONTEXT_WATCH_NO_TOAST
+ * Env overrides: CONTEXT_WATCH_PERCENT, CONTEXT_WATCH_TOKENS,
+ * CONTEXT_WATCH_WINDOW, CONTEXT_WATCH_REARM, CONTEXT_WATCH_REARM_TOKENS,
+ * CONTEXT_WATCH_MESSAGE, CONTEXT_WATCH_NO_TOAST
  */
 
 import { existsSync, readFileSync } from "node:fs"
@@ -43,8 +43,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import type { Message, Part } from "@opencode-ai/sdk"
 
 interface ContextWatchOptions {
-  mode?: "percent" | "tokens"
-  warnThreshold?: number
+  warnPercent?: number
   warnTokens?: number
   windowTokens?: number | null
   rearmPercent?: number
@@ -57,8 +56,7 @@ interface ContextWatchOptions {
 const CONFIG_PATH = join(homedir(), ".config/opencode/context-watch.json")
 
 const DEFAULTS = {
-  mode: "percent" as "percent" | "tokens",
-  warnThreshold: 0.77,
+  warnPercent: 0.77,
   warnTokens: 100_000,
   windowTokens: null as number | null,
   rearmPercent: 5,
@@ -79,10 +77,8 @@ function loadOptions(): Required<ContextWatchOptions> {
     console.log("[context-watch] failed to read config file", CONFIG_PATH, err)
   }
 
-  const modeRaw = process.env.CONTEXT_WATCH_MODE ?? file.mode ?? DEFAULTS.mode
-  const mode: "percent" | "tokens" = modeRaw === "tokens" ? "tokens" : "percent"
-  const rawThreshold = Number(
-    process.env.CONTEXT_WATCH_THRESHOLD ?? file.warnThreshold ?? DEFAULTS.warnThreshold,
+  const rawPercent = Number(
+    process.env.CONTEXT_WATCH_PERCENT ?? file.warnPercent ?? DEFAULTS.warnPercent,
   )
   const rawTokens = Number(process.env.CONTEXT_WATCH_TOKENS ?? file.warnTokens ?? DEFAULTS.warnTokens)
   const windowRaw = Number(process.env.CONTEXT_WATCH_WINDOW ?? file.windowTokens ?? 0)
@@ -92,8 +88,7 @@ function loadOptions(): Required<ContextWatchOptions> {
   )
 
   return {
-    mode,
-    warnThreshold: rawThreshold > 1 ? rawThreshold / 100 : rawThreshold,
+    warnPercent: rawPercent > 1 ? rawPercent / 100 : rawPercent,
     warnTokens: rawTokens,
     windowTokens: windowRaw > 0 ? windowRaw : null,
     rearmPercent: rearm,
@@ -126,12 +121,12 @@ function contextTokens(messages: { info: Message; parts: Part[] }[]): number | u
 
 export const ContextWatchPlugin: Plugin = async ({ client }) => {
   const opts = loadOptions()
-  const thresholdPct = opts.warnThreshold * 100
+  const thresholdPct = opts.warnPercent * 100
 
   // sessionID -> model context window, cached by system.transform (messages.transform has no model info)
   const windowCache = new Map<string, number>()
-  // sessionID -> last warned value, to rearm only after a rise
-  const lastWarned = new Map<string, number>()
+  // sessionID -> last warned value per band, to rearm only after a rise
+  const lastWarned = new Map<string, { pct?: number; tokens?: number }>()
 
   const toast = async (text: string) => {
     if (!opts.toast) return
@@ -159,13 +154,12 @@ export const ContextWatchPlugin: Plugin = async ({ client }) => {
 
       const window = opts.windowTokens ?? windowCache.get(sessionID)
 
-      // Threshold check in the selected mode.
+      // Threshold checks: warn when EITHER band is crossed. The percent band
+      // requires a known model window; when it is unknown only tokens applies.
       const pct = window && window > 0 ? (tokens / window) * 100 : undefined
-      if (opts.mode === "tokens") {
-        if (tokens < opts.warnTokens) return
-      } else {
-        if (pct === undefined || pct < thresholdPct) return
-      }
+      const overPercent = pct !== undefined && pct >= thresholdPct
+      const overTokens = tokens >= opts.warnTokens
+      if (!overPercent && !overTokens) return
 
       // Rearm band: only gate the toast + verbose log, NOT the model injection.
       // The injected message is transient per transform call (it is never
@@ -173,10 +167,16 @@ export const ContextWatchPlugin: Plugin = async ({ client }) => {
       // above threshold — otherwise the final answering step in a multi-step
       // loop (tool calls, etc.) would not see the warning.
       const last = lastWarned.get(sessionID)
-      const value = opts.mode === "tokens" ? tokens : pct
-      const rearmGap = opts.mode === "tokens" ? opts.rearmTokens : opts.rearmPercent
-      const shouldNotify = last === undefined || value! - last >= rearmGap
-      if (shouldNotify) lastWarned.set(sessionID, value!)
+      const pctReArmed = overPercent && (last?.pct === undefined || pct! - last.pct >= opts.rearmPercent)
+      const tokensReArmed = overTokens && (last?.tokens === undefined || tokens - last.tokens >= opts.rearmTokens)
+      const shouldNotify = pctReArmed || tokensReArmed
+      if (pctReArmed || tokensReArmed) {
+        lastWarned.set(sessionID, {
+          ...last,
+          ...(pctReArmed && overPercent ? { pct } : {}),
+          ...(tokensReArmed && overTokens ? { tokens } : {}),
+        })
+      }
 
       const text = opts.message
         .replaceAll("{percent}", String(Math.round(pct ?? 0)))
@@ -211,7 +211,6 @@ export const ContextWatchPlugin: Plugin = async ({ client }) => {
       if (shouldNotify) {
         log("warn", "context warning injected", {
           sessionID,
-          mode: opts.mode,
           percent: pct === undefined ? undefined : Math.round(pct),
           messageTokens: tokens,
           window,
@@ -219,9 +218,9 @@ export const ContextWatchPlugin: Plugin = async ({ client }) => {
           messageCount: output.messages.length,
         })
         void toast(
-          opts.mode === "tokens"
-            ? `Session context reached ${tokens.toLocaleString()} tokens — getting full`
-            : `Context window at ${Math.round(pct!)}% — getting full`,
+          overPercent
+            ? `Context window at ${Math.round(pct!)}% — getting full`
+            : `Session context reached ${tokens.toLocaleString()} tokens — getting full`,
         )
       }
     },
