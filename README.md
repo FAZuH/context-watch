@@ -23,8 +23,8 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 
 ```json
 {
-  "mode": "percent",
-  "warnThreshold": 0.75,
+  "warnPercent": 0.75,
+  "warnTokens": 100000,
   "rearmPercent": 2,
   "message": "[context-watch] Context window usage is at {percent}% ({tokens}/{window} tokens). The session is getting full: wrap up the current step soon, keep replies concise, avoid re-reading large files, and be ready to prepare for compaction if you continue."
 }
@@ -34,23 +34,27 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `mode` | `"percent"` | `"percent"` or `"tokens"` |
-| `warnThreshold` | `0.77` | 0..1, or percent (e.g. 77) if > 1 (percent mode) |
-| `warnTokens` | `100000` | Warn when session reaches this many tokens (tokens mode) |
-| `rearmPercent` | `5` | Re-warn after this many percentage-point rise (percent mode) |
-| `rearmTokens` | `5000` | Re-warn after this many more tokens (tokens mode) |
+| `warnPercent` | `0.77` | 0..1, or percent (e.g. 77) if > 1. Warn when usage reaches this fraction of the model window |
+| `warnTokens` | `100000` | Warn when session reaches this many tokens |
+| `rearmPercent` | `5` | Re-warn after this many percentage-point rise |
+| `rearmTokens` | `5000` | Re-warn after this many more tokens |
 | `toast` | `true` | Show a TUI toast when a band is crossed |
 | `verbose` | `false` | Log context estimates to the opencode log |
 | `message` | — | Template; placeholders `{percent}` `{tokens}` `{window}` |
 
 ### Env overrides
 
-`CONTEXT_WATCH_MODE`, `CONTEXT_WATCH_THRESHOLD`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`
+`CONTEXT_WATCH_PERCENT`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`
 
 ### Notes
 
-- In `tokens` mode the window is optional; `{percent}`/`{window}` render `0`/`unknown` when the model window is not known.
-- In `percent` mode the model window must be known (cached by `system.transform` in the live TUI; pass `CONTEXT_WATCH_WINDOW` when using `opencode run`).
+- The warning fires when **either** threshold is crossed (whichever comes first). Both thresholds can be active at once.
+- The percent threshold requires the model window to be known (cached by `system.transform` in the live TUI; pass `CONTEXT_WATCH_WINDOW` when using `opencode run`). When the window is unknown, only the tokens threshold applies; `{percent}`/`{window}` render `0`/`unknown`.
+
+## Documentation
+
+- [Design & technical reference](docs/design.md) — architecture, token ground truth, thresholds, gotchas
+- [ADR-001](docs/decisions/ADR-001.md) — why warnings are injected as transient synthetic messages
 
 ## Development
 
