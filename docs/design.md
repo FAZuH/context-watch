@@ -1,4 +1,4 @@
-# context-watch: Design & Technical Reference
+# opencode-context-watch: Design & Technical Reference
 
 An [opencode](https://opencode.ai) plugin that warns the agent when a session's context window usage crosses a threshold, so it can wrap up the current step or prepare for compaction before the window fills.
 
@@ -39,7 +39,7 @@ The plugin warns when **either** band is crossed (`src/index.ts:159-162`):
 - **Percent band** — `tokens / window >= warnPercent`. Requires a known model window; when the window is unknown this band is disabled.
 - **Tokens band** — `tokens >= warnTokens`. Absolute, window-independent.
 
-This means `warnPercent: 0.77` with `warnTokens: 100000` warns whichever comes first. For a 200k window model, 0.77 is 154k tokens — the percent band fires first. On a small-window model, the tokens band can fire first.
+This means `warnPercent: 0.77` with `warnTokens: 150000` warns whichever comes first. For a 200k window model, 0.77 is 154k tokens — the percent band fires first. On a small-window model, the tokens band can fire first.
 
 ### Rearm band
 
@@ -57,7 +57,7 @@ The synthetic message is pushed into the *current transform call's in-memory* me
 
 ### Config is read once at load
 
-`loadOptions()` runs when the plugin module loads; the file `~/.config/opencode/context-watch.json` is read a single time. **Changes require an opencode restart.**
+`loadOptions()` runs when the plugin module loads; the file `~/.config/opencode/opencode-context-watch.json` is read a single time. **Changes require an opencode restart.**
 
 ### Percent mode needs a known window
 
@@ -66,12 +66,12 @@ The synthetic message is pushed into the *current transform call's in-memory* me
 
 ## Configuration
 
-Config file (optional): `~/.config/opencode/context-watch.json`. Read once at load; restart to apply.
+Config file (optional): `~/.config/opencode/opencode-context-watch.json`. Read once at load; restart to apply.
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `warnPercent` | `0.77` | 0..1, or percent (e.g. `77`) if > 1. Warn when `tokens/window` crosses this. |
-| `warnTokens` | `100000` | Warn when the session reaches this many tokens (absolute). |
+| `warnTokens` | `150000` | Warn when the session reaches this many tokens (absolute). |
 | `windowTokens` | `null` | Override the model's context window (tokens). |
 | `rearmPercent` | `5` | Re-warn after this many percentage-point rise (percent band). |
 | `rearmTokens` | `5000` | Re-warn after this many more tokens (tokens band). |

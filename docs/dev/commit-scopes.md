@@ -9,7 +9,7 @@ not affect version bump logic.
 | Scope     | Area                                                                 |
 |-----------|----------------------------------------------------------------------|
 | `plugin`  | Core plugin behavior in `src/index.ts` — transforms, threshold and rearm bands, warning injection, toast and logging |
-| `config`  | Configuration schema, option defaults, env overrides, and `context-watch.example.json` |
+| `config`  | Configuration schema, option defaults, env overrides, and `opencode-context-watch.example.json` |
 | `docs`    | Documentation — `README.md`, `docs/`, `AGENTS.md`                     |
 | `dev`     | Development tooling — `dev.sh`, `package.json` scripts, biome/tsc/bundle setup |
 | `release` | Version bumps and release commits (for example `chore(release)`)      |

@@ -37,5 +37,11 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      - name: Test typecheck
+        run: bunx tsc -p tsconfig.test.json --noEmit
+
+      - name: Tests
+        run: bun test
+
       - name: Bundle check
         run: bun build src/index.ts --outdir dist
