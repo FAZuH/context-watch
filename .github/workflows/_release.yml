@@ -101,8 +101,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC trusted publishing
+        run: npm install -g npm@latest
 
       - name: Download patched package.json
         uses: actions/download-artifact@v4
@@ -118,8 +121,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-changelog:
     name: Publish Changelog Commit
