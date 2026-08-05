@@ -5,7 +5,7 @@
  * so you can wrap up the current step or prepare for compaction before the
  * window is full. Warns again as usage rises through each rearm band.
  *
- * Default thresholds: 77% of the model's context window, or 100k tokens —
+ * Default thresholds: 77% of the model's context window, or 150k tokens —
  * whichever comes first.
  *
  * How it works:
@@ -22,7 +22,7 @@
  * Config file (optional): ~/.config/opencode/context-watch.json
  * {
  *   "warnPercent": 0.77,     // 0..1, or percent (e.g. 77) if > 1
- *   "warnTokens": 100000,    // warn when session reaches this many tokens
+ *   "warnTokens": 150000,    // warn when session reaches this many tokens
  *   "windowTokens": null,    // override the model's context window (tokens)
  *   "rearmPercent": 5,       // re-warn after this many percentage-point rise
  *   "rearmTokens": 5000,     // re-warn after this many more tokens
@@ -57,7 +57,7 @@ const CONFIG_PATH = join(homedir(), ".config/opencode/context-watch.json")
 
 const DEFAULTS = {
   warnPercent: 0.77,
-  warnTokens: 100_000,
+  warnTokens: 150_000,
   windowTokens: null as number | null,
   rearmPercent: 5,
   rearmTokens: 5_000,
