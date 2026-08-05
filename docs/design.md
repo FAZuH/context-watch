@@ -1,4 +1,4 @@
-# context-watch: Design & Technical Reference
+# opencode-context-watch: Design & Technical Reference
 
 An [opencode](https://opencode.ai) plugin that warns the agent when a session's context window usage crosses a threshold, so it can wrap up the current step or prepare for compaction before the window fills.
 

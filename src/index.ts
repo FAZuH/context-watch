@@ -1,5 +1,5 @@
 /**
- * context-watch — opencode plugin
+ * opencode-context-watch — opencode plugin
  *
  * Warns the agent when a session's context window usage crosses a threshold,
  * so you can wrap up the current step or prepare for compaction before the

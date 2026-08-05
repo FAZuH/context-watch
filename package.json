@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/FAZuH/context-watch"
+    "url": "https://github.com/FAZuH/opencode-context-watch"
   },
   "files": ["src"],
   "license": "MIT",

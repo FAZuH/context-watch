@@ -1,4 +1,4 @@
-# AGENTS.md - context-watch
+# AGENTS.md - opencode-context-watch
 
 ## Overview
 

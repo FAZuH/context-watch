@@ -1,4 +1,4 @@
-# context-watch
+# opencode-context-watch
 
 Warn when a session's context window usage crosses a configurable threshold. An [opencode](https://opencode.ai) plugin that injects a warning into the conversation so the agent can wrap up the current step or prepare for compaction before the window is full.
 
