@@ -39,7 +39,7 @@ The plugin warns when **either** band is crossed (`src/index.ts:159-162`):
 - **Percent band** — `tokens / window >= warnPercent`. Requires a known model window; when the window is unknown this band is disabled.
 - **Tokens band** — `tokens >= warnTokens`. Absolute, window-independent.
 
-This means `warnPercent: 0.77` with `warnTokens: 100000` warns whichever comes first. For a 200k window model, 0.77 is 154k tokens — the percent band fires first. On a small-window model, the tokens band can fire first.
+This means `warnPercent: 0.77` with `warnTokens: 150000` warns whichever comes first. For a 200k window model, 0.77 is 154k tokens — the percent band fires first. On a small-window model, the tokens band can fire first.
 
 ### Rearm band
 
@@ -71,7 +71,7 @@ Config file (optional): `~/.config/opencode/context-watch.json`. Read once at lo
 | Key | Default | Description |
 |-----|---------|-------------|
 | `warnPercent` | `0.77` | 0..1, or percent (e.g. `77`) if > 1. Warn when `tokens/window` crosses this. |
-| `warnTokens` | `100000` | Warn when the session reaches this many tokens (absolute). |
+| `warnTokens` | `150000` | Warn when the session reaches this many tokens (absolute). |
 | `windowTokens` | `null` | Override the model's context window (tokens). |
 | `rearmPercent` | `5` | Re-warn after this many percentage-point rise (percent band). |
 | `rearmTokens` | `5000` | Re-warn after this many more tokens (tokens band). |

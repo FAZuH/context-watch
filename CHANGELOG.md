@@ -1,3 +1,9 @@
+## Unreleased
+
+### New Features
+
+* Invalid config (bad JSON, wrong types, out-of-range values, unknown keys, bad env overrides) now shows a TUI error toast listing what is wrong, falls back to defaults per key, and logs full detail to the opencode log.
+
 ## 0.1.1 (2026-08-05)
 
 

@@ -10,6 +10,12 @@ An opencode plugin that warns when a session's context window usage crosses a co
 # Typecheck
 npx tsc --noEmit
 
+# Test typecheck (tests typechecked separately; root tsconfig is src-only)
+npx tsc -p tsconfig.test.json --noEmit
+
+# Tests (bun:test, tests/ dir)
+bun test
+
 # Bundle check
 bun build src/index.ts --outdir dist
 
@@ -20,6 +26,11 @@ bunx biome format --write .
 bunx biome check .
 ```
 
+Note: `bunx biome check .` is NOT clean at HEAD — pre-existing `noNonNullAssertion`
+errors in `src/index.ts` and `lint` errors in `.github/.config.cjs`. Also, biome
+reformats `package.json`/`tsconfig.json`/`.config.cjs` to tabs (HEAD keeps 2-space),
+so `dev.sh format` re-dirties them; revert before committing.
+
 ## Critical Implementation Notes
 
 - The injected warning is TRANSIENT — it is pushed into the current transform call's in-memory messages array and is never persisted to the session store. The session loop re-reads messages from the store each step, so the warning must be pushed on EVERY `experimental.chat.messages.transform` call while above threshold. The rearm band (`lastWarned`) gates only the toast + verbose log, NOT the injection.
@@ -27,6 +38,8 @@ bunx biome check .
 - The model window is cached per sessionID via `experimental.chat.system.transform` (`input.model.limit.context`); `messages.transform` has no model info.
 - The current model `opencode/deepseek-v4-flash-free` has a 200k window (NOT 1M — that's `deepseek/deepseek-v4-flash`).
 - Config is read once at load time; changes require an opencode restart.
+- Config validation lives in `resolveOptions(raw, env)` (pure, exported): env > file > default precedence, per-key fallback to defaults, each bad value reported as a `{ key, message }` problem. Invalid config shows a TUI error toast (variant `error`) at load + once more on the first `messages.transform` if the load toast failed; it ALWAYS fires even when `toast: false`. The toast path is race-free (synchronous flags, no `.then` mutation, attempts capped at 3).
+- Tests use a test-only `configPath` seam on the plugin factory (`plugin({ client }, { configPath })`) because Node/bun `os.homedir()` caches after the first call — per-test HOME isolation does NOT work.
 
 ## Code Style
 

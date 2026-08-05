@@ -19,7 +19,7 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 ```json
 {
   "warnPercent": 0.75,
-  "warnTokens": 100000,
+  "warnTokens": 150000,
   "rearmPercent": 2,
   "message": "[context-watch] Context window usage is at {percent}% ({tokens}/{window} tokens). The session is getting full: wrap up the current step soon, keep replies concise, avoid re-reading large files, and be ready to prepare for compaction if you continue."
 }
@@ -30,7 +30,7 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 | Option | Default | Description |
 |--------|---------|-------------|
 | `warnPercent` | `0.77` | 0..1, or percent (e.g. 77) if > 1. Warn when usage reaches this fraction of the model window |
-| `warnTokens` | `100000` | Warn when session reaches this many tokens |
+| `warnTokens` | `150000` | Warn when session reaches this many tokens |
 | `rearmPercent` | `5` | Re-warn after this many percentage-point rise |
 | `rearmTokens` | `5000` | Re-warn after this many more tokens |
 | `toast` | `true` | Show a TUI toast when a band is crossed |
@@ -45,6 +45,10 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 
 - The warning fires when **either** threshold is crossed (whichever comes first). Both thresholds can be active at once.
 - The percent threshold requires the model window to be known (cached by `system.transform` in the live TUI; pass `CONTEXT_WATCH_WINDOW` when using `opencode run`). When the window is unknown, only the tokens threshold applies; `{percent}`/`{window}` render `0`/`unknown`.
+
+### Configuration errors
+
+If the config file or an env override is invalid — bad JSON, wrong types, out-of-range values, or unknown keys — the plugin falls back to the default for each bad value and shows a TUI error toast listing exactly what is wrong. The full list is also written to the opencode log. The plugin keeps running with the defaults for the broken keys.
 
 ## How it works
 
