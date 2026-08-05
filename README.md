@@ -2,11 +2,6 @@
 
 Warn when a session's context window usage crosses a configurable threshold. An [opencode](https://opencode.ai) plugin that injects a warning into the conversation so the agent can wrap up the current step or prepare for compaction before the window is full.
 
-## How it works
-
-- `experimental.chat.messages.transform` reads the real context size from the most recent completed assistant message's provider-reported token counts (the same number opencode's TUI context meter shows), then — when the threshold is crossed — pushes a synthetic user message into `output.messages` so the warning is visible to the model as part of the conversation.
-- `experimental.chat.system.transform` caches the model's context window from `model.limit.context` because the messages transform does not receive model info.
-
 ## Installation
 
 Register in `opencode.json`:
@@ -51,10 +46,10 @@ Config file (optional): `~/.config/opencode/context-watch.json`
 - The warning fires when **either** threshold is crossed (whichever comes first). Both thresholds can be active at once.
 - The percent threshold requires the model window to be known (cached by `system.transform` in the live TUI; pass `CONTEXT_WATCH_WINDOW` when using `opencode run`). When the window is unknown, only the tokens threshold applies; `{percent}`/`{window}` render `0`/`unknown`.
 
-## Documentation
+## How it works
 
-- [Design & technical reference](docs/design.md) — architecture, token ground truth, thresholds, gotchas
-- [ADR-001](docs/decisions/ADR-001.md) — why warnings are injected as transient synthetic messages
+- `experimental.chat.messages.transform` reads the real context size from the most recent completed assistant message's provider-reported token counts (the same number opencode's TUI context meter shows), then — when the threshold is crossed — pushes a synthetic user message into `output.messages` so the warning is visible to the model as part of the conversation.
+- `experimental.chat.system.transform` caches the model's context window from `model.limit.context` because the messages transform does not receive model info.
 
 ## Development
 
