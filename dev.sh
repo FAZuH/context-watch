@@ -64,15 +64,31 @@ cmd_bundle() {
 }
 dev_desc bundle "Build bundle with \"bun build src/index.ts --outdir dist\""
 
+cmd_test() {
+    inf "Running tests..."
+    bun test
+    scs "Tests completed"
+}
+dev_desc test "Run tests with \"bun test\""
+
+cmd_test_typecheck() {
+    inf "Typechecking tests..."
+    bunx tsc -p tsconfig.test.json --noEmit
+    scs "Test typecheck completed"
+}
+dev_desc test:typecheck "Typecheck tests with \"tsc -p tsconfig.test.json --noEmit\""
+
 cmd_all() {
     inf "Running all tasks..."
     cmd_format
     cmd_lint
     cmd_typecheck
+    cmd_test_typecheck
     cmd_bundle
+    cmd_test
     scs "All tasks completed"
 }
-dev_desc all "Run format, lint, typecheck, and bundle in sequence"
+dev_desc all "Run format, lint, typecheck, bundle, and tests in sequence"
 
 # --- Module discovery ---
 
@@ -114,8 +130,9 @@ Examples:
   ./dev.sh lint                    # Run linter
   ./dev.sh typecheck               # Run typecheck
   ./dev.sh bundle                  # Build bundle
+  ./dev.sh test                    # Run tests
   ./dev.sh format lint             # Format then lint
-  ./dev.sh all                     # Run format, lint, typecheck, bundle
+  ./dev.sh all                     # Run format, lint, typecheck, bundle, tests
 
 EOF
 }
