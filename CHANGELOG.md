@@ -1,8 +1,24 @@
-## Unreleased
+## 0.1.2 (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* Config file is renamed. Rename your config file to `opencode-context-watch.json`.
+
+### Code Refactoring
+
+* Renamed config file name to `opencode-context-watch.json` ([f6ffcb5](https://github.com/FAZuH/opencode-context-watch/commit/f6ffcb57bb89e5f4a88d6b5fcfa93dc7d6567035))
+* Renamed project repository to "opencode-context-watch" ([d46d60b](https://github.com/FAZuH/opencode-context-watch/commit/d46d60b77e54363e1dd5ff23de00b54a6e505b28))
+
 
 ### New Features
 
-* Invalid config (bad JSON, wrong types, out-of-range values, unknown keys, bad env overrides) now shows a TUI error toast listing what is wrong, falls back to defaults per key, and logs full detail to the opencode log.
+* Added TUI error toast on invalid config, falling back to defaults ([4664e3a](https://github.com/FAZuH/opencode-context-watch/commit/4664e3aa22a7dac3f08a2da7e9ff6e521fe10ffa))
+
+
+### Miscellaneous Chores
+
+* Modified default 'warnTokens' config to 150k tokens ([4585dd5](https://github.com/FAZuH/opencode-context-watch/commit/4585dd52a1480ba8f2adef80e1a9361eefd795e8))
 
 ## 0.1.1 (2026-08-05)
 
