@@ -19,7 +19,7 @@
  *   metadata; it caches the real window from `model.limit.context` because
  *   `messages.transform` does not receive model info.
  *
- * Config file (optional): ~/.config/opencode/context-watch.json
+ * Config file (optional): ~/.config/opencode/opencode-context-watch.json
  * {
  *   "warnPercent": 0.77,     // 0..1, or percent (e.g. 77) if > 1
  *   "warnTokens": 150000,    // warn when session reaches this many tokens
@@ -65,7 +65,10 @@ interface ConfigProblem {
 
 export type { ConfigProblem };
 
-const CONFIG_PATH = join(homedir(), ".config/opencode/context-watch.json");
+const CONFIG_PATH = join(
+	homedir(),
+	".config/opencode/opencode-context-watch.json",
+);
 
 const DEFAULTS = {
 	warnPercent: 0.77,

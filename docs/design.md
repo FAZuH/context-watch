@@ -57,7 +57,7 @@ The synthetic message is pushed into the *current transform call's in-memory* me
 
 ### Config is read once at load
 
-`loadOptions()` runs when the plugin module loads; the file `~/.config/opencode/context-watch.json` is read a single time. **Changes require an opencode restart.**
+`loadOptions()` runs when the plugin module loads; the file `~/.config/opencode/opencode-context-watch.json` is read a single time. **Changes require an opencode restart.**
 
 ### Percent mode needs a known window
 
@@ -66,7 +66,7 @@ The synthetic message is pushed into the *current transform call's in-memory* me
 
 ## Configuration
 
-Config file (optional): `~/.config/opencode/context-watch.json`. Read once at load; restart to apply.
+Config file (optional): `~/.config/opencode/opencode-context-watch.json`. Read once at load; restart to apply.
 
 | Key | Default | Description |
 |-----|---------|-------------|

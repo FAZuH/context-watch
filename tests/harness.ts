@@ -51,7 +51,7 @@ export async function createHarness(
 	opts: { failFirstToast?: boolean; env?: Record<string, string> } = {},
 ): Promise<Harness> {
 	const home = mkdtempSync(join(tmpdir(), "context-watch-test-"));
-	const configPath = join(home, "context-watch.json");
+	const configPath = join(home, "opencode-context-watch.json");
 	if (config !== null) {
 		writeFileSync(configPath, config, "utf8");
 	}

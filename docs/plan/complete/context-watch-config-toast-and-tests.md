@@ -62,7 +62,7 @@ Verify with:
 - `bunx biome check .` and `bunx biome format --write .`
 - `bun build src/index.ts --outdir dist`
 - `./dev.sh all`
-- Optional manual: bad `~/.config/opencode/context-watch.json` → error toast.
+- Optional manual: bad `~/.config/opencode/opencode-context-watch.json` → error toast.
 
 ## Deviation log
 

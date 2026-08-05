@@ -20,7 +20,7 @@ OpenCode detects both package entrypoints and writes the plugin into the server 
 
 ## Configuration
 
-Config file (optional): `~/.config/opencode/context-watch.json`
+Config file (optional): `~/.config/opencode/opencode-context-watch.json`
 
 ```json
 {
