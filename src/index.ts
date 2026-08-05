@@ -402,7 +402,7 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 			const last = lastWarned.get(sessionID);
 			const pctReArmed =
 				overPercent &&
-				(last?.pct === undefined || pct! - last.pct >= opts.rearmPercent);
+				(last?.pct === undefined || (pct ?? 0) - last.pct >= opts.rearmPercent);
 			const tokensReArmed =
 				overTokens &&
 				(last?.tokens === undefined ||
@@ -455,22 +455,19 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 			});
 
 			if (shouldNotify) {
+				const lastPart = output.messages.at(-1)?.parts[0];
 				log("warn", "context warning injected", {
 					sessionID,
 					percent: pct === undefined ? undefined : Math.round(pct),
 					messageTokens: tokens,
 					window,
 					lastMessageText:
-						output.messages.at(-1)?.parts[0]?.type === "text"
-							? (
-									output.messages.at(-1)!.parts[0] as { text: string }
-								).text.slice(0, 80)
-							: "none",
+						lastPart?.type === "text" ? lastPart.text.slice(0, 80) : "none",
 					messageCount: output.messages.length,
 				});
 				void toast(
-					overPercent
-						? `Context window at ${Math.round(pct!)}% — getting full`
+					overPercent && pct !== undefined
+						? `Context window at ${Math.round(pct)}% — getting full`
 						: `Session context reached ${tokens.toLocaleString()} tokens — getting full`,
 				);
 			}
