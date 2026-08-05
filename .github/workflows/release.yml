@@ -8,12 +8,13 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 jobs:
   release:
     name: Release
     uses: ./.github/workflows/_release.yml
     with:
-      package-name: context-watch-opencode
-      publish-npm: false
+      package-name: opencode-context-watch
+      publish-npm: true
     secrets: inherit

@@ -50,8 +50,7 @@ jobs:
 
       - name: Install changelog dependencies
         run: |
-          npm install conventional-changelog-conventionalcommits@7.0.2
-          rm -f package.json package-lock.json
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
 
       - name: Generate Changelog (dry run)
         id: changelog
@@ -91,6 +90,8 @@ jobs:
       needs.changelog.result == 'success' &&
       needs.build.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: npm
     steps:
@@ -159,8 +160,7 @@ jobs:
 
       - name: Install changelog dependencies
         run: |
-          npm install conventional-changelog-conventionalcommits@7.0.2
-          rm -f package.json package-lock.json
+          npm install --no-save --no-package-lock conventional-changelog-conventionalcommits@7.0.2
 
       - name: Commit, Tag, Push
         id: commit
