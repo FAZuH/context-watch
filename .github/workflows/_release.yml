@@ -59,7 +59,7 @@ jobs:
           skip-commit: true
           skip-tag: true
           github-token: ${{ secrets.PRIVATE_TOKEN }}
-          config-file-path: ./.github/.config.js
+          config-file-path: ./.github/.config.cjs
           version-file: ./version.json
           preset: conventionalcommits
           skip-version-file: true
@@ -169,7 +169,7 @@ jobs:
           github-token: ${{ secrets.PRIVATE_TOKEN }}
           git-user-name: "faz-bot"
           git-user-email: "mail@fazuh.com"
-          config-file-path: ./.github/.config.js
+          config-file-path: ./.github/.config.cjs
           version-file: ./version.json
           preset: conventionalcommits
           skip-version-file: true
