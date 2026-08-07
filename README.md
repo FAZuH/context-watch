@@ -27,6 +27,8 @@ Config file (optional): `~/.config/opencode/opencode-context-watch.json`
   "warnPercent": 0.75,
   "warnTokens": 150000,
   "rearmPercent": 2,
+  "postCompactContinue": true,
+  "postCompactMsg": "[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.",
   "message": "[context-watch] Context window usage is at {percent}% ({tokens}/{window} tokens). The session is getting full: wrap up the current step soon, keep replies concise, avoid re-reading large files, and be ready to prepare for compaction if you continue."
 }
 ```
@@ -42,10 +44,12 @@ Config file (optional): `~/.config/opencode/opencode-context-watch.json`
 | `toast` | `true` | Show a TUI toast when a band is crossed |
 | `verbose` | `false` | Log context estimates to the opencode log |
 | `message` | — | Template; placeholders `{percent}` `{tokens}` `{window}` |
+| `postCompactContinue` | `false` | Send a message after compaction |
+| `postCompactMsg` | `[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.` | Text of the post-compaction message |
 
 ### Env overrides
 
-`CONTEXT_WATCH_PERCENT`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`
+`CONTEXT_WATCH_PERCENT`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`, `CONTEXT_WATCH_POST_COMPACT_CONTINUE`, `CONTEXT_WATCH_POST_COMPACT_MSG`
 
 ### Notes
 
@@ -60,6 +64,7 @@ If the config file or an env override is invalid — bad JSON, wrong types, out-
 
 - `experimental.chat.messages.transform` reads the real context size from the most recent completed assistant message's provider-reported token counts (the same number opencode's TUI context meter shows), then — when the threshold is crossed — pushes a synthetic user message into `output.messages` so the warning is visible to the model as part of the conversation.
 - `experimental.chat.system.transform` caches the model's context window from `model.limit.context` because the messages transform does not receive model info.
+- The plugin registers a `compact_context` tool the agent can call to compact its own session when the window is full. When `postCompactContinue` is enabled, a successful compaction posts `postCompactMsg` as a real user message (suppressing opencode's synthetic continue) so the session resumes on the configured instruction. When it is off, no message is sent after compaction.
 
 ## Development
 
