@@ -49,6 +49,28 @@ This means `warnPercent: 0.77` with `warnTokens: 150000` warns whichever comes f
 
 When above threshold, the plugin pushes a synthetic user message (`role: "user"`, `synthetic: true`) carrying the rendered template (`{percent}` `{tokens}` `{window}` placeholders replaced). The message ID/time are generated fresh each push (`msg_cw_<base36 timestamp>`). The agent/model metadata are cloned from the last real user message when available, so the synthetic message looks like a normal user turn to the provider.
 
+## Compact_context tool and post-compaction message
+
+The plugin also gives the agent a way to compact its own session, plus a way to control what the session does after compaction.
+
+### Compact_context tool
+
+The plugin registers a `compact_context` tool (`src/index.ts:501`). The tool is always registered; there is no opt-out config. The agent calls it when the session is getting full. Its `execute(args, ctx)` calls `triggerCompact(ctx.sessionID)` (`src/index.ts:472`), which works like this:
+
+1. v2 path: `await v2Client.v2.session.compact({ sessionID })`. The v2 client is built lazily once at load from `@opencode-ai/sdk/v2/client`.
+2. v1 fallback: on any v2 failure or resolved-error, `client.session.summarize({ path: { id: sessionID }, body: { providerID, modelID, auto: true } })`. The `providerID` and `modelID` come from the per-session model cache captured by `experimental.chat.system.transform` (`input.model.providerID`, `input.model.id`; the window is `input.model.limit.context`). If the cache has no model for the session, the tool returns `"Compaction failed: <detail>"` and does NOT call summarize. `auto: true` makes opencode's `experimental.compaction.autocontinue` hook fire, so a tool-triggered compaction still posts the configured continue message. The v2 `session.compact` endpoint is a server-side hard stub on opencode 1.18.11 (`ServiceUnavailableError` — "Session compact is not available yet"), so on that build the summarize fallback is the path that actually compacts. The old v1 command fallback is dropped: research proved it is dead (`UnknownError` on 1.18.11), so the tool no longer mirrors the `/compact` keybind.
+3. The tool never throws. It returns `"Compaction requested."` on success or `"Compaction failed: <detail>"` on failure, so the agent sees the outcome as the tool result.
+
+### Post-compaction message
+
+When `postCompactContinue` is on, the `experimental.compaction.autocontinue` hook (`src/index.ts:509`) runs after a successful compaction:
+
+- `output.enabled = false` suppresses opencode's synthetic "continue" message.
+- `client.session.promptAsync({ path: { id: input.sessionID }, body: { agent: input.agent, parts: [{ type: "text", text: opts.postCompactMsg }] } })` injects the configured text as a real, persisted user message. The call is fire-and-forget with a `.catch` log; a race here is tolerated by design.
+- When `postCompactContinue` is off, the hook still sets `output.enabled = false` (so opencode's synthetic continue is suppressed too) but sends no message at all.
+
+The injected message is REAL, unlike the transient warning injection. It is persisted to the session store, so the session loop processes it as the next user turn.
+
 ## Critical design gotchas
 
 ### The injection is transient — push on EVERY turn
@@ -64,6 +86,13 @@ The synthetic message is pushed into the *current transform call's in-memory* me
 - Live TUI: window is cached per session via `system.transform` automatically.
 - `opencode run` (headless/CI): no TUI, so no cache — pass `CONTEXT_WATCH_WINDOW` explicitly, or the percent band silently stays disabled (tokens band still applies).
 
+### The v2 client import must be the client-only subpath
+
+- Import the v2 client from `@opencode-ai/sdk/v2/client`, never the full `/v2` entry. The full entry imports cross-spawn and child_process and breaks `bun build` browser-mode.
+- `compact` lives on `v2Client.v2.session` (the `Session3` client), not on the top-level `v2Client.session` (the `Session2` client lacks it).
+- The v1 `command` and `promptAsync` methods live on the top-level `client.session.*`, not on `client.app.session.*` (`App` only has `log` and `agents`).
+- `PluginInput.serverUrl` is a `URL` object; pass `serverUrl?.href` as `baseUrl`.
+
 ## Configuration
 
 Config file (optional): `~/.config/opencode/opencode-context-watch.json`. Read once at load; restart to apply.
@@ -78,12 +107,14 @@ Config file (optional): `~/.config/opencode/opencode-context-watch.json`. Read o
 | `toast` | `true` | Show a TUI toast when a band is crossed. |
 | `verbose` | `false` | Log context estimates to the opencode log (`client.app.log`). |
 | `message` | default template | Injection template; placeholders `{percent}` `{tokens}` `{window}`. |
+| `postCompactContinue` | `false` | Send a message after compaction. |
+| `postCompactMsg` | `[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.` | Text of the post-compaction message. |
 
 ### Environment overrides (win over file)
 
-`CONTEXT_WATCH_PERCENT`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`.
+`CONTEXT_WATCH_PERCENT`, `CONTEXT_WATCH_TOKENS`, `CONTEXT_WATCH_WINDOW`, `CONTEXT_WATCH_REARM`, `CONTEXT_WATCH_REARM_TOKENS`, `CONTEXT_WATCH_MESSAGE`, `CONTEXT_WATCH_NO_TOAST`, `CONTEXT_WATCH_POST_COMPACT_CONTINUE`, `CONTEXT_WATCH_POST_COMPACT_MSG`.
 
-`warnPercent` normalization: values > 1 are divided by 100 (so `77` and `0.77` both mean 77%). `windowTokens` values <= 0 are treated as unknown (`null`).
+`warnPercent` normalization: values > 1 are divided by 100 (so `77` and `0.77` both mean 77%). `windowTokens` values <= 0 are treated as unknown (`null`). `CONTEXT_WATCH_POST_COMPACT_CONTINUE` accepts literal `true`, `false`, or a numeric string (non-zero means `true`); anything else pushes a problem and falls back to file/default.
 
 ## Verification
 
