@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Plugin } from "@opencode-ai/plugin";
 import type { Message, Part } from "@opencode-ai/sdk";
+import type { V2CompactClient } from "../src/index";
 import pluginFactory from "../src/index";
 
 const ENV_VARS = [
@@ -13,6 +14,8 @@ const ENV_VARS = [
 	"CONTEXT_WATCH_REARM_TOKENS",
 	"CONTEXT_WATCH_MESSAGE",
 	"CONTEXT_WATCH_NO_TOAST",
+	"CONTEXT_WATCH_POST_COMPACT_CONTINUE",
+	"CONTEXT_WATCH_POST_COMPACT_MSG",
 ];
 
 export interface FakeClient {
@@ -26,12 +29,30 @@ export interface FakeClient {
 			body: { level: string; message: string; extra: unknown };
 		}) => Promise<unknown>;
 	};
+	session: {
+		promptAsync: (arg: {
+			path: { id: string };
+			body: { parts: { type: string; text: string }[]; agent?: string };
+		}) => Promise<unknown>;
+		summarize: (arg: {
+			path: { id: string };
+			body: { providerID: string; modelID: string; auto: boolean };
+		}) => Promise<unknown>;
+	};
 }
 
 export interface Harness {
 	toasts: { message: string; variant: string }[];
 	appLogs: { level: string; message: string; extra: unknown }[];
+	sessionPrompts: { sessionID: string; text: string; agent?: string }[];
+	sessionSummarizes: {
+		sessionID: string;
+		providerID: string;
+		modelID: string;
+		auto: boolean;
+	}[];
 	showToastCalls: () => number;
+	sessionSummarizeCalls: () => number;
 	handlers: Awaited<ReturnType<Plugin>>;
 	cleanup: () => void;
 }
@@ -48,7 +69,15 @@ export function must<T>(value: T | undefined, what: string): T {
  */
 export async function createHarness(
 	config: string | null,
-	opts: { failFirstToast?: boolean; env?: Record<string, string> } = {},
+	opts: {
+		failFirstToast?: boolean;
+		failSessionSummarize?: boolean;
+		sessionSummarizeResolved?: unknown;
+		sessionSummarizeHang?: boolean;
+		env?: Record<string, string>;
+		createOpencodeClientV2?: (config: { baseUrl?: string }) => V2CompactClient;
+		summarizeTimeoutMs?: number;
+	} = {},
 ): Promise<Harness> {
 	const home = mkdtempSync(join(tmpdir(), "context-watch-test-"));
 	const configPath = join(home, "opencode-context-watch.json");
@@ -66,8 +95,17 @@ export async function createHarness(
 	}
 
 	let showToastCalls = 0;
+	let sessionSummarizeCalls = 0;
 	const toasts: { message: string; variant: string }[] = [];
 	const appLogs: { level: string; message: string; extra: unknown }[] = [];
+	const sessionPrompts: { sessionID: string; text: string; agent?: string }[] =
+		[];
+	const sessionSummarizes: {
+		sessionID: string;
+		providerID: string;
+		modelID: string;
+		auto: boolean;
+	}[] = [];
 	const client: FakeClient = {
 		tui: {
 			showToast: async ({ body }) => {
@@ -84,15 +122,45 @@ export async function createHarness(
 				return {};
 			},
 		},
+		session: {
+			promptAsync: async ({ path, body }) => {
+				const text = body.parts
+					.map((p) => (p.type === "text" ? p.text : ""))
+					.join("");
+				sessionPrompts.push({ sessionID: path.id, text, agent: body.agent });
+				return {};
+			},
+			summarize: async ({ path, body }) => {
+				sessionSummarizeCalls++;
+				if (opts.sessionSummarizeHang) return new Promise<never>(() => {});
+				if (opts.failSessionSummarize) throw new Error("summarize rejected");
+				if (opts.sessionSummarizeResolved !== undefined)
+					return opts.sessionSummarizeResolved;
+				sessionSummarizes.push({
+					sessionID: path.id,
+					providerID: body.providerID,
+					modelID: body.modelID,
+					auto: body.auto,
+				});
+				return {};
+			},
+		},
 	};
 
-	const handlers = await pluginFactory({ client } as never, { configPath });
+	const handlers = await pluginFactory({ client } as never, {
+		configPath,
+		createOpencodeClientV2: opts.createOpencodeClientV2,
+		summarizeTimeoutMs: opts.summarizeTimeoutMs,
+	});
 	await new Promise((r) => setTimeout(r, 0));
 
 	return {
 		toasts,
 		appLogs,
+		sessionPrompts,
+		sessionSummarizes,
 		showToastCalls: () => showToastCalls,
+		sessionSummarizeCalls: () => sessionSummarizeCalls,
 		handlers,
 		cleanup: () => {
 			rmSync(home, { recursive: true, force: true });
@@ -148,4 +216,33 @@ export function buildMessages(
 			{ info: assistant, parts: [part(assistant.id, "assistant")] },
 		],
 	};
+}
+
+/**
+ * Seed the plugin's per-session model cache through the real system.transform
+ * hook so tests exercise the capture path instead of reaching into internals.
+ * The v1 `Model` type has `id` (not `modelID`); the hook captures `id` as the
+ * summary modelID.
+ */
+export async function seedModel(
+	h: Harness,
+	sessionID: string,
+	model: { providerID: string; modelID: string; window: number },
+): Promise<void> {
+	const hook = must(
+		h.handlers["experimental.chat.system.transform"],
+		"system.transform hook",
+	);
+	await hook(
+		{
+			sessionID,
+			model: {
+				providerID: model.providerID,
+				modelID: model.modelID,
+				id: model.modelID,
+				limit: { context: model.window, output: 1 },
+			} as never,
+		},
+		{ system: [] },
+	);
 }

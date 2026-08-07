@@ -1,50 +1,7 @@
-/**
- * opencode-context-watch — opencode plugin
- *
- * Warns the agent when a session's context window usage crosses a threshold,
- * so you can wrap up the current step or prepare for compaction before the
- * window is full. Warns again as usage rises through each rearm band.
- *
- * Default thresholds: 77% of the model's context window, or 150k tokens —
- * whichever comes first.
- *
- * How it works:
- * - `experimental.chat.messages.transform` runs each turn with the full
- *   assembled context. It reads the real context size from the most recent
- *   completed assistant message's provider-reported token counts (the same
- *   number opencode's TUI context meter shows), then — when the threshold is
- *   crossed — pushes a synthetic user message into `output.messages` so the
- *   warning is visible to the model as part of the conversation.
- * - `experimental.chat.system.transform` runs in the same turn with the model
- *   metadata; it caches the real window from `model.limit.context` because
- *   `messages.transform` does not receive model info.
- *
- * Config file (optional): ~/.config/opencode/opencode-context-watch.json
- * {
- *   "warnPercent": 0.77,     // 0..1, or percent (e.g. 77) if > 1
- *   "warnTokens": 150000,    // warn when session reaches this many tokens
- *   "windowTokens": null,    // override the model's context window (tokens)
- *   "rearmPercent": 5,       // re-warn after this many percentage-point rise
- *   "rearmTokens": 5000,     // re-warn after this many more tokens
- *   "toast": true,           // show a TUI toast when a band is crossed
- *   "verbose": false,        // log context estimates to the opencode log
- *   "message": "..."         // template; placeholders {percent} {tokens} {window}
- * }
- *
- * Env overrides: CONTEXT_WATCH_PERCENT, CONTEXT_WATCH_TOKENS,
- * CONTEXT_WATCH_WINDOW, CONTEXT_WATCH_REARM, CONTEXT_WATCH_REARM_TOKENS,
- * CONTEXT_WATCH_MESSAGE, CONTEXT_WATCH_NO_TOAST
- *
- * If the config file or an env override is invalid — bad JSON, wrong types,
- * out-of-range values, unknown keys — the plugin falls back to the default for
- * each bad value and shows a TUI error toast listing what is wrong (full
- * detail is also written to the opencode log).
- */
-
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Plugin } from "@opencode-ai/plugin";
+import { type Plugin, tool } from "@opencode-ai/plugin";
 import type { Message, Part } from "@opencode-ai/sdk";
 
 interface ContextWatchOptions {
@@ -56,6 +13,8 @@ interface ContextWatchOptions {
 	toast?: boolean;
 	verbose?: boolean;
 	message?: string;
+	postCompactContinue?: boolean;
+	postCompactMsg?: string;
 }
 
 interface ConfigProblem {
@@ -64,6 +23,21 @@ interface ConfigProblem {
 }
 
 export type { ConfigProblem };
+
+/**
+ * Minimal structural shape of the v2 SDK client we need for compaction. The
+ * real `@opencode-ai/sdk/v2` client satisfies it (`v2.session.compact`); the
+ * plugin also accepts a fake via the test seam, and loads the real one lazily
+ * so a missing v2 export degrades to the v1 fallback instead of crashing
+ * plugin load.
+ */
+export interface V2CompactClient {
+	v2: {
+		session: {
+			compact(params: { sessionID: string }): Promise<unknown>;
+		};
+	};
+}
 
 const CONFIG_PATH = join(
 	homedir(),
@@ -80,6 +54,9 @@ const DEFAULTS = {
 	verbose: false,
 	message:
 		"[context-watch] Context window usage is at {percent}% ({tokens}/{window} tokens). The session is getting full: wrap up the current step soon, keep replies concise, avoid re-reading large files, and be ready to prepare for compaction if you continue.",
+	postCompactContinue: false,
+	postCompactMsg:
+		"[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.",
 };
 
 const CONFIG_KEYS = new Set([
@@ -91,7 +68,13 @@ const CONFIG_KEYS = new Set([
 	"toast",
 	"verbose",
 	"message",
+	"postCompactContinue",
+	"postCompactMsg",
 ]);
+
+// How long to wait for the v1 summarize before giving up on its response. See
+// triggerCompact: awaiting it to completion deadlocks the session loop.
+const DEFAULT_SUMMARIZE_TIMEOUT_MS = 3000;
 
 /**
  * Pure config resolution: given the parsed config file contents and an env
@@ -103,6 +86,8 @@ export function resolveOptions(
 	raw: unknown,
 	env: Record<string, string | undefined>,
 ): { options: Required<ContextWatchOptions>; problems: ConfigProblem[] } {
+	// opencode's bootstrap plugin-load pass may call this with `env === undefined`.
+	const envMap = env ?? {};
 	const problems: ConfigProblem[] = [];
 
 	let conf: Record<string, unknown>;
@@ -129,7 +114,7 @@ export function resolveOptions(
 		expected: string,
 		test: (n: number) => boolean,
 	): number => {
-		const envValue = env[envName];
+		const envValue = envMap[envName];
 		if (envValue !== undefined) {
 			const n = Number(envValue);
 			if (Number.isFinite(n) && test(n)) return n;
@@ -167,7 +152,7 @@ export function resolveOptions(
 	);
 
 	const windowTokens = (() => {
-		const envValue = env.CONTEXT_WATCH_WINDOW;
+		const envValue = envMap.CONTEXT_WATCH_WINDOW;
 		if (envValue !== undefined) {
 			const n = Number(envValue);
 			if (Number.isFinite(n) && n > 0) return n;
@@ -218,8 +203,8 @@ export function resolveOptions(
 	};
 
 	let message = DEFAULTS.message;
-	if (env.CONTEXT_WATCH_MESSAGE !== undefined) {
-		message = env.CONTEXT_WATCH_MESSAGE;
+	if (envMap.CONTEXT_WATCH_MESSAGE !== undefined) {
+		message = envMap.CONTEXT_WATCH_MESSAGE;
 	} else {
 		const value = conf.message;
 		if (value !== undefined) {
@@ -234,6 +219,38 @@ export function resolveOptions(
 		}
 	}
 
+	const postCompactContinue = (() => {
+		const envValue = envMap.CONTEXT_WATCH_POST_COMPACT_CONTINUE;
+		if (envValue !== undefined) {
+			if (envValue === "true") return true;
+			if (envValue === "false") return false;
+			const n = Number(envValue);
+			if (Number.isFinite(n)) return n !== 0;
+			problems.push({
+				key: "postCompactContinue",
+				message: `CONTEXT_WATCH_POST_COMPACT_CONTINUE must be a boolean (got ${JSON.stringify(envValue)}); falling back to config/default`,
+			});
+		}
+		return bool("postCompactContinue", DEFAULTS.postCompactContinue);
+	})();
+
+	let postCompactMsg = DEFAULTS.postCompactMsg;
+	if (envMap.CONTEXT_WATCH_POST_COMPACT_MSG !== undefined) {
+		postCompactMsg = envMap.CONTEXT_WATCH_POST_COMPACT_MSG;
+	} else {
+		const value = conf.postCompactMsg;
+		if (value !== undefined) {
+			if (typeof value === "string" && value.trim().length > 0) {
+				postCompactMsg = value;
+			} else {
+				problems.push({
+					key: "postCompactMsg",
+					message: `postCompactMsg must be a non-empty string (got ${JSON.stringify(value)})`,
+				});
+			}
+		}
+	}
+
 	return {
 		options: {
 			warnPercent: warnPercent > 1 ? warnPercent / 100 : warnPercent,
@@ -241,9 +258,13 @@ export function resolveOptions(
 			windowTokens,
 			rearmPercent,
 			rearmTokens,
-			toast: env.CONTEXT_WATCH_NO_TOAST ? false : bool("toast", DEFAULTS.toast),
+			toast: envMap.CONTEXT_WATCH_NO_TOAST
+				? false
+				: bool("toast", DEFAULTS.toast),
 			verbose: bool("verbose", DEFAULTS.verbose),
 			message,
+			postCompactContinue,
+			postCompactMsg,
 		},
 		problems,
 	};
@@ -298,10 +319,22 @@ function contextTokens(
 	return undefined;
 }
 
-export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
-	// `configPath` is a test-only seam; opencode always uses the default path.
-	const configPath = (pluginOptions as { configPath?: string } | undefined)
-		?.configPath;
+export const ContextWatchPlugin: Plugin = async (
+	{ client, serverUrl },
+	pluginOptions,
+) => {
+	// Test-only seams; opencode always uses the default config path and its own
+	// bundled `@opencode-ai/sdk/v2` client factory.
+	const seam = pluginOptions as
+		| {
+				configPath?: string;
+				createOpencodeClientV2?: (config: {
+					baseUrl?: string;
+				}) => V2CompactClient;
+				summarizeTimeoutMs?: number;
+		  }
+		| undefined;
+	const configPath = seam?.configPath;
 	const { options: opts, problems } = loadOptions(configPath);
 	const thresholdPct = opts.warnPercent * 100;
 
@@ -347,10 +380,34 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 		void configToast();
 	}
 
-	// sessionID -> model context window, cached by system.transform (messages.transform has no model info)
-	const windowCache = new Map<string, number>();
+	// sessionID -> model info, cached by system.transform (messages.transform has no model info)
+	const modelCache = new Map<
+		string,
+		{ window?: number; providerID?: string; modelID?: string }
+	>();
 	// sessionID -> last warned value per band, to rearm only after a rise
 	const lastWarned = new Map<string, { pct?: number; tokens?: number }>();
+
+	// v2 client for the compact_context tool, built once at load. Loaded lazily
+	// (client-only subpath — the full `/v2` entry pulls in the server and would
+	// break the browser-mode bundle with node builtins) so a missing v2 export
+	// degrades to the v1 fallback instead of crashing plugin load; tests inject
+	// a fake via the seam.
+	let v2Client: V2CompactClient | undefined;
+	try {
+		const create = seam?.createOpencodeClientV2;
+		v2Client = create
+			? create({ baseUrl: serverUrl?.href })
+			: (await import("@opencode-ai/sdk/v2/client")).createOpencodeClient({
+					baseUrl: serverUrl?.href,
+				});
+	} catch (err) {
+		v2Client = undefined;
+		console.log(
+			"[context-watch] v2 compact client unavailable; using v1 fallback",
+			err,
+		);
+	}
 
 	const toast = async (text: string) => {
 		if (!opts.toast) return;
@@ -375,7 +432,147 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 			.catch(() => {});
 	};
 
+	// The SDK clients RESOLVE (do not throw) even on error, carrying an `error`
+	// field on the result (e.g. `{ error: {...}, response: {} }`). Treat any
+	// such resolution as a failure so we fall through to the next path.
+	const extractError = (res: unknown): string | undefined => {
+		if (res && typeof res === "object" && "error" in res) {
+			const e = (res as { error?: unknown }).error;
+			if (!e) return undefined;
+			if (typeof e === "string") return e;
+			try {
+				return JSON.stringify(e);
+			} catch {
+				return String(e);
+			}
+		}
+		return undefined;
+	};
+
+	// Trigger compaction of the current session: prefer the v2 `session.compact`
+	// endpoint, fall back to the v1 `/session/{id}/summarize` path (a real
+	// compaction; `auto: true` so the autocontinue hook fires after it). Never
+	// throws — returns an error string so the agent sees it. An `error` field
+	// in a resolved response counts as a failure.
+	const triggerCompact = async (sessionID: string): Promise<string> => {
+		let v2Error: string | undefined;
+		if (v2Client) {
+			try {
+				const res = await v2Client.v2.session.compact({ sessionID });
+				const err = extractError(res);
+				if (err) {
+					v2Error = err;
+					log(
+						"warn",
+						"v2 compact failed (server error); falling back to v1 summarize",
+						{ sessionID, error: err },
+					);
+				} else {
+					log("warn", "compaction requested via v2 client", { sessionID });
+					return "Compaction requested.";
+				}
+			} catch (err) {
+				v2Error = err instanceof Error ? err.message : String(err);
+				log("warn", "v2 compact failed; falling back to v1 summarize", {
+					sessionID,
+					error: v2Error,
+				});
+			}
+		}
+		const model = modelCache.get(sessionID);
+		if (!model?.providerID || !model?.modelID) {
+			const detail = v2Error
+				? `${v2Error}; no model info cached for summarize`
+				: "no model info cached for summarize";
+			log("warn", "compaction request failed", { sessionID, error: detail });
+			return `Compaction failed: ${detail}`;
+		}
+		try {
+			const summarize = client.session.summarize({
+				path: { id: sessionID },
+				// `auto` is not in the generated SDK types but the handler accepts
+				// it and fires the autocontinue hook only when it is true.
+				body: {
+					providerID: model.providerID,
+					modelID: model.modelID,
+					auto: true,
+				} as { providerID: string; modelID: string; auto: boolean },
+			});
+			const summarizeTimeoutMs =
+				seam?.summarizeTimeoutMs ?? DEFAULT_SUMMARIZE_TIMEOUT_MS;
+			// Awaiting the summarize to completion self-deadlocks when this tool
+			// runs inside a session loop (opencode 1.18.x, upstream #5449): the
+			// summarize handler joins the running session-loop fiber, so the
+			// response never arrives. Race it instead; on timeout the compaction
+			// still proceeds server-side and the loop picks up the persisted
+			// compaction task, so we stop waiting and report success.
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				const winner = await Promise.race([
+					summarize.then(() => "settled"),
+					new Promise<string>((resolve) => {
+						timer = setTimeout(() => resolve("timeout"), summarizeTimeoutMs);
+					}),
+				]);
+				if (winner === "timeout") {
+					// The summarize may still settle later; swallow its outcome so
+					// a late rejection is never an unhandled promise rejection.
+					summarize.catch((err) => console.log("[context-watch]", err));
+					log("warn", "compaction requested via v1 summarize (async)", {
+						sessionID,
+					});
+					return "Compaction requested.";
+				}
+			} finally {
+				clearTimeout(timer);
+			}
+			const res = await summarize;
+			const err = extractError(res);
+			if (err) {
+				const detail = v2Error ? `${v2Error}; ${err}` : err;
+				log("warn", "compaction request failed", { sessionID, error: detail });
+				return `Compaction failed: ${detail}`;
+			}
+			log("warn", "compaction requested via v1 summarize", { sessionID });
+			return "Compaction requested.";
+		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
+			const combined = v2Error ? `${v2Error}; ${detail}` : detail;
+			log("warn", "compaction request failed", { sessionID, error: combined });
+			return `Compaction failed: ${combined}`;
+		}
+	};
+
 	return {
+		tool: {
+			compact_context: tool({
+				description:
+					"Compact the current session's context window, freeing space. Call when the session is getting full or the model asks to compact.",
+				args: {},
+				execute: async (_args, ctx) => triggerCompact(ctx.sessionID),
+			}),
+		},
+
+		"experimental.compaction.autocontinue": async (input, output) => {
+			// Always suppress opencode's synthetic "continue" user message. When
+			// postCompactContinue is off, nothing is sent at all after compaction;
+			// when on, the configured text is injected as a real, persisted user
+			// message instead.
+			output.enabled = false;
+			if (!opts.postCompactContinue) return;
+			client.session
+				.promptAsync({
+					path: { id: input.sessionID },
+					body: {
+						agent: input.agent,
+						parts: [{ type: "text", text: opts.postCompactMsg }],
+					},
+				})
+				.catch((err) =>
+					console.log("[context-watch] compact message injection failed", err),
+				);
+		},
+
 		"experimental.chat.messages.transform": async (_input, output) => {
 			if (problems.length > 0 && !configErrorShown) {
 				void configToast();
@@ -385,7 +582,7 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 			const tokens = contextTokens(output.messages);
 			if (tokens === undefined) return;
 
-			const window = opts.windowTokens ?? windowCache.get(sessionID);
+			const window = opts.windowTokens ?? modelCache.get(sessionID)?.window;
 
 			// Threshold checks: warn when EITHER band is crossed. The percent band
 			// requires a known model window; when it is unknown only tokens applies.
@@ -476,8 +673,12 @@ export const ContextWatchPlugin: Plugin = async ({ client }, pluginOptions) => {
 		"experimental.chat.system.transform": async (input, output) => {
 			const sessionID = input.sessionID;
 			if (!sessionID) return;
-			const window = input.model?.limit?.context;
-			if (window && window > 0) windowCache.set(sessionID, window);
+			const cached = modelCache.get(sessionID) ?? {};
+			const context = input.model?.limit?.context;
+			if (context && context > 0) cached.window = context;
+			if (input.model?.providerID) cached.providerID = input.model.providerID;
+			if (input.model?.id) cached.modelID = input.model.id;
+			modelCache.set(sessionID, cached);
 		},
 	};
 };

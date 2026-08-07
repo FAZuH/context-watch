@@ -38,6 +38,19 @@ describe("resolveOptions", () => {
 			expect(ps).toEqual([]);
 			expect(o.warnPercent).toBe(0.77);
 		});
+
+		test("handles an undefined env (bootstrap load pass) and returns defaults", () => {
+			const { options: o, problems: ps } = resolveOptions(
+				{},
+				undefined as unknown as Record<string, string | undefined>,
+			);
+			expect(ps).toEqual([]);
+			expect(o.warnPercent).toBe(0.77);
+			expect(o.postCompactContinue).toBe(false);
+			expect(o.postCompactMsg).toBe(
+				"[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.",
+			);
+		});
 	});
 
 	describe("warnPercent", () => {
@@ -165,6 +178,93 @@ describe("resolveOptions", () => {
 			);
 			expect(o.message).toContain("{percent}");
 			expect(hasProblemFor(ps, "message")).toBe(true);
+		});
+	});
+
+	describe("postCompactContinue and postCompactMsg", () => {
+		const DEFAULT_TEXT =
+			"[context-watch] Session context was compacted. Continue your work from where you left off, keeping replies concise.";
+
+		test("defaults to false and the default text with no problems", () => {
+			const { options: o, problems: ps } = resolveOptions({}, EMPTY_ENV);
+			expect(ps).toEqual([]);
+			expect(o.postCompactContinue).toBe(false);
+			expect(o.postCompactMsg).toBe(DEFAULT_TEXT);
+		});
+
+		test("accepts file values", () => {
+			const { options: o, problems: ps } = resolveOptions(
+				{ postCompactContinue: true, postCompactMsg: "resume work" },
+				EMPTY_ENV,
+			);
+			expect(ps).toEqual([]);
+			expect(o.postCompactContinue).toBe(true);
+			expect(o.postCompactMsg).toBe("resume work");
+		});
+
+		test.each([
+			["postCompactContinue", "postCompactContinue", "yes"],
+			["postCompactMsg", "postCompactMsg", ""],
+			["postCompactMsg", "postCompactMsg", "   "],
+		])(
+			"rejects a bad %s and falls back to the default",
+			(_label, key, value) => {
+				const { options: o, problems: ps } = resolveOptions(
+					{ [key]: value },
+					EMPTY_ENV,
+				);
+				expect(hasProblemFor(ps, key)).toBe(true);
+				expect(o[key as keyof typeof o]).toBe(
+					key === "postCompactContinue" ? false : DEFAULT_TEXT,
+				);
+			},
+		);
+
+		test("CONTEXT_WATCH_POST_COMPACT_CONTINUE env overrides the file value", () => {
+			expect(
+				resolveOptions(
+					{ postCompactContinue: false },
+					{ CONTEXT_WATCH_POST_COMPACT_CONTINUE: "true" },
+				).options.postCompactContinue,
+			).toBe(true);
+			expect(
+				resolveOptions(
+					{ postCompactContinue: true },
+					{ CONTEXT_WATCH_POST_COMPACT_CONTINUE: "false" },
+				).options.postCompactContinue,
+			).toBe(false);
+		});
+
+		test("CONTEXT_WATCH_POST_COMPACT_CONTINUE env accepts numeric booleans", () => {
+			expect(
+				resolveOptions({}, { CONTEXT_WATCH_POST_COMPACT_CONTINUE: "1" }).options
+					.postCompactContinue,
+			).toBe(true);
+			expect(
+				resolveOptions({}, { CONTEXT_WATCH_POST_COMPACT_CONTINUE: "0" }).options
+					.postCompactContinue,
+			).toBe(false);
+		});
+
+		test("an invalid postCompactContinue env falls back to the file value and cites the env var", () => {
+			const { options: o, problems: ps } = resolveOptions(
+				{ postCompactContinue: true },
+				{ CONTEXT_WATCH_POST_COMPACT_CONTINUE: "banana" },
+			);
+			expect(o.postCompactContinue).toBe(true);
+			const msg =
+				ps.find((p) => p.key === "postCompactContinue")?.message ?? "";
+			expect(msg).toContain("CONTEXT_WATCH_POST_COMPACT_CONTINUE");
+			expect(msg).toContain("banana");
+		});
+
+		test("CONTEXT_WATCH_POST_COMPACT_MSG env overrides the file value", () => {
+			expect(
+				resolveOptions(
+					{ postCompactMsg: "file text" },
+					{ CONTEXT_WATCH_POST_COMPACT_MSG: "env text" },
+				).options.postCompactMsg,
+			).toBe("env text");
 		});
 	});
 
